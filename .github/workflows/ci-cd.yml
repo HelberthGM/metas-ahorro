@@ -1,0 +1,124 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]   # PR: solo validación y pruebas
+  push:
+    branches: [main]   # push a main: pruebas + imagen + despliegue
+
+# Permisos mínimos por defecto; cada job pide solo lo que necesita.
+permissions:
+  contents: read
+
+# En PR se cancela la ejecución anterior si llega un commit nuevo.
+# En main NUNCA se cancela una ejecución en curso.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  test:
+    name: Validación y pruebas
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v5
+
+      - name: Instalar Python 3.14 (con caché de pip)
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Instalar dependencias de desarrollo
+        run: pip install -r requirements-dev.txt
+
+      - name: Revisión estática (ruff)
+        run: ruff check --output-format=github .
+
+      - name: Pruebas (pytest)
+        run: pytest --junitxml=reports/junit.xml
+
+      - name: Resumen de pruebas
+        if: always()
+        run: |
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET, os
+          if not os.path.exists("reports/junit.xml"):
+              print("### ⚠️ No se generó el reporte de pruebas"); raise SystemExit
+          s = ET.parse("reports/junit.xml").getroot().find("testsuite")
+          total, fal, err, omit = (int(s.get(k)) for k in ("tests", "failures", "errors", "skipped"))
+          ok = total - fal - err - omit
+          print(f"### {'✅' if fal + err == 0 else '❌'} Pruebas: {ok}/{total} correctas")
+          print(f"| Correctas | Fallidas | Errores | Omitidas | Tiempo |\n|---|---|---|---|---|")
+          print(f"| {ok} | {fal} | {err} | {omit} | {float(s.get('time')):.2f} s |")
+          EOF
+
+      - name: Guardar reporte JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-pruebas
+          path: reports/junit.xml
+
+  # ─────────────────────────────────────────────────────────────
+  image:
+    name: Construir y publicar imagen
+    needs: test                       # si las pruebas fallan, no hay imagen
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write                 # solo este job puede publicar en GHCR
+    outputs:
+      image: ${{ steps.nombre.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v5
+
+      - name: Nombre de la imagen en minúsculas
+        id: nombre
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Preparar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Iniciar sesión en GHCR (con GITHUB_TOKEN)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Construir y publicar
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          provenance: false           # digest = manifiesto simple de la imagen
+          build-args: |
+            APP_REVISION=${{ github.sha }}
+          tags: |
+            ${{ steps.nombre.outputs.image }}:latest
+            ${{ steps.nombre.outputs.image }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Resumen de la imagen
+        run: |
+          {
+            echo "### 🐳 Imagen publicada en GHCR"
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| Imagen | \`${{ steps.nombre.outputs.image }}\` |"
+            echo "| Etiquetas | \`latest\`, \`sha-${{ github.sha }}\` |"
+            echo "| Digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo "| Commit (APP_REVISION) | \`${{ github.sha }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

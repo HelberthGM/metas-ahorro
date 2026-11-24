@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calculadora de metas de ahorro</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="contenedor">
+    <header class="encabezado">
+      <span class="version">{{ version }} · rev {{ revision }}</span>
+      <h1>Calculadora de metas de ahorro</h1>
+      <p class="mensaje">{{ mensaje }}</p>
+    </header>
+
+    {% if errores %}
+      <div class="alerta" role="alert">
+        <strong>Revisa los datos:</strong>
+        <ul>{% for e in errores %}<li>{{ e }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+
+    <form method="post" class="tarjeta" novalidate>
+      <label>Nombre de la meta
+        <input name="nombre" maxlength="80" placeholder="Comprar un portátil" value="{{ datos.get('nombre', '') }}">
+      </label>
+      <label>Valor objetivo
+        <input name="objetivo" inputmode="decimal" placeholder="2500000" value="{{ datos.get('objetivo', '') }}">
+      </label>
+      <label>Dinero ya ahorrado
+        <input name="ahorrado" inputmode="decimal" placeholder="500000" value="{{ datos.get('ahorrado', '') }}">
+      </label>
+      <label>Ahorro mensual
+        <input name="mensual" inputmode="decimal" placeholder="300000" value="{{ datos.get('mensual', '') }}">
+      </label>
+      <p class="ayuda">Escribe solo números, sin puntos de miles. Decimales opcionales: 2500000.50</p>
+      <button type="submit">Calcular</button>
+    </form>
+
+    {% if resultado %}
+      <section class="tarjeta resultado">
+        <h2>{{ resultado.nombre }}</h2>
+        {% if resultado.cumplida %}
+          <p class="exito">¡Meta cumplida! Ya ahorraste {{ resultado.ahorrado | moneda }}.</p>
+        {% else %}
+          <p>Te faltan <strong>{{ resultado.falta | moneda }}</strong>.</p>
+          <p>Ahorrando {{ resultado.mensual | moneda }} al mes, lo lograrás en
+             <strong>{{ resultado.meses }} {{ 'mes' if resultado.meses == 1 else 'meses' }}</strong>.</p>
+        {% endif %}
+        <div class="barra" aria-label="Avance {{ resultado.porcentaje }} %">
+          <div class="relleno" style="width: {{ resultado.porcentaje }}%"></div>
+        </div>
+        <p class="porcentaje">Avance: {{ resultado.porcentaje }} %</p>
+      </section>
+    {% endif %}
+  </main>
+</body>
+</html>

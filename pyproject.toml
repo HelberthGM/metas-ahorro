@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 110
+target-version = "py314"
+
+[tool.ruff.lint]
+# E/W: estilo PEP 8, F: errores reales (variables sin usar, imports rotos), I: orden de imports, B: bugs comunes
+select = ["E", "W", "F", "I", "B"]

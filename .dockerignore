@@ -1,0 +1,19 @@
+# Todo lo que NO debe enviarse al contexto de construcción de Docker
+.git/
+.github/
+.gitignore
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+reports/
+tests/
+.env
+.env.*
+.vscode/
+.idea/
+*.md
+Dockerfile
+.dockerignore

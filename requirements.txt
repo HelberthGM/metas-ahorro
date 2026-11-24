@@ -1,0 +1,3 @@
+# Dependencias de EJECUCIÓN (lo único que va dentro de la imagen Docker)
+Flask==3.1.3
+gunicorn==27.0.1
