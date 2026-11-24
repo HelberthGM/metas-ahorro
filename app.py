@@ -7,8 +7,8 @@ from flask import Flask, jsonify, render_template, request
 from calculos import formato_moneda, procesar_formulario
 
 # ─── Textos de demostración: cambia esto durante la sustentación ───
-APP_VERSION = "Versión 1"
-MENSAJE_PORTADA = "Tu próxima meta empieza hoy"
+APP_VERSION = "Versión 2"
+MENSAJE_PORTADA = "Tu próxima meta ya tiene plan"
 # ───────────────────────────────────────────────────────────────────
 
 # Commit desplegado. Se incorpora a la imagen Docker en la construcción
