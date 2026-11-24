@@ -122,3 +122,100 @@ jobs:
             echo "| Digest | \`${{ steps.build.outputs.digest }}\` |"
             echo "| Commit (APP_REVISION) | \`${{ github.sha }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────
+  deploy:
+    name: Desplegar en Render
+    needs: image                      # sin imagen publicada no hay despliegue
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.RENDER_SERVICE_URL }}
+    # Un solo despliegue a la vez. Nunca se cancela uno en curso; si llegan
+    # varios, GitHub deja en espera solo el más reciente (no hay desorden).
+    concurrency:
+      group: deploy-render
+      cancel-in-progress: false
+    steps:
+      - name: Solicitar despliegue de la imagen exacta (por digest)
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          IMAGEN: ${{ needs.image.outputs.image }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOOK:-}" ]; then
+            echo "::error::Falta el secret RENDER_DEPLOY_HOOK_URL (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          REFERENCIA="${IMAGEN}@${DIGEST}"
+          echo "Imagen a desplegar: ${REFERENCIA}"
+          CODIFICADA=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$REFERENCIA")
+
+          # El hook ya trae ?key=...; se añade &imgURL=<imagen@digest codificada>.
+          CODIGO=$(curl -sS -X POST -o respuesta.json -w '%{http_code}' "${HOOK}&imgURL=${CODIFICADA}") || CODIGO=000
+
+          case "$CODIGO" in
+            200) echo "✅ Render ACEPTÓ la solicitud y empezó el despliegue: $(cat respuesta.json)" ;;
+            202) echo "⏳ Render ya tenía un despliegue en curso; este queda en cola." ;;
+            400) echo "::error::Render rechazó imgURL (HTTP 400). La imagen del servicio debe ser ${IMAGEN}:latest."; exit 1 ;;
+            *)   echo "::error::El deploy hook respondió HTTP ${CODIGO}. Revisa el secret y Render → Events."; exit 1 ;;
+          esac
+          {
+            echo "### 🚀 Despliegue solicitado a Render (HTTP ${CODIGO})"
+            echo "Referencia: \`${REFERENCIA}\`"
+            echo ""
+            echo "Solicitud aceptada ≠ despliegue completado: el job **verify** lo confirma."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────
+  verify:
+    name: Verificar nueva versión en línea
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Esperar a que la URL pública sirva el commit esperado
+        env:
+          URL_BASE: ${{ vars.RENDER_SERVICE_URL }}
+          ESPERADO: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          if [ -z "${URL_BASE:-}" ]; then
+            echo "::error::Falta la variable RENDER_SERVICE_URL (Settings → Secrets and variables → Actions → Variables)."
+            exit 1
+          fi
+          URL_BASE="${URL_BASE%/}"
+          LIMITE=480          # tiempo máximo: 8 minutos (incluye arranque en frío)
+          ESPERA=15           # segundos entre intentos
+          INICIO=$SECONDS
+          INTENTO=0
+          echo "Esperando revisión ${ESPERADO} en ${URL_BASE}/version"
+
+          while [ $((SECONDS - INICIO)) -lt $LIMITE ]; do
+            INTENTO=$((INTENTO + 1))
+            rm -f version.json
+            CODIGO=$(curl -s -o version.json -w '%{http_code}' --max-time 30 "${URL_BASE}/version") || true
+            REV=$(python3 -c 'import json; print(json.load(open("version.json")).get("revision", ""))' 2>/dev/null) || REV=""
+            echo "Intento ${INTENTO} ($((SECONDS - INICIO)) s): HTTP ${CODIGO:-000}, revisión en línea = ${REV:-?}"
+
+            if [ "${CODIGO:-}" = "200" ] && [ "$REV" = "$ESPERADO" ]; then
+              SALUD=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${URL_BASE}/health") || SALUD=000
+              if [ "$SALUD" = "200" ]; then
+                echo "✅ Nueva versión disponible: $(cat version.json)"
+                {
+                  echo "### ✅ Nueva versión disponible en ${URL_BASE}"
+                  echo "| Comprobación | Resultado |"
+                  echo "|---|---|"
+                  echo "| /version | \`$(cat version.json)\` |"
+                  echo "| /health | HTTP ${SALUD} |"
+                  echo "| Tiempo hasta disponible | $((SECONDS - INICIO)) s (${INTENTO} intentos) |"
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              echo "/version ya es correcta pero /health respondió HTTP ${SALUD}; reintentando…"
+            fi
+            sleep $ESPERA
+          done
+
+          echo "::error::Tras ${LIMITE} s la URL no sirve la revisión ${ESPERADO}. Revisa Render → Events y Logs del servicio."
+          exit 1
