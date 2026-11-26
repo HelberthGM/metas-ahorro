@@ -19,6 +19,6 @@ jobs:
           aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           application_name: calculadora-ahorro
           environment_name: Calculadora-ahorro-env
-          region: us-east-2
+          region: us-east-1
           version_label: ${{ github.sha }}
           deployment_package: .
