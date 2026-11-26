@@ -1,12 +1,16 @@
-# Calculadora de metas de ahorro — CI/CD con GitHub Actions, GHCR y Render
+# Calculadora de metas de ahorro — CI/CD con GitHub Actions, Docker y AWS Elastic Beanstalk
 
 Proyecto académico individual (Ingeniería de Sistemas · DevOps). Aplicación web pequeña y original
-cuyo objetivo es demostrar un **ciclo completo de CI/CD**: cada push a `main` se prueba, se empaqueta
-en una imagen Docker, se publica en GHCR, se despliega automáticamente en Render y se verifica.
+cuyo objetivo es demostrar un **ciclo completo de CI/CD**: cada push a `main` se prueba y se despliega
+automáticamente (imagen Docker en GHCR → Render, y paquete de código → AWS Elastic Beanstalk).
 
-- **URL pública:** https://metas-ahorro.onrender.com
-- **Salud:** https://metas-ahorro.onrender.com/health
-- **Versión desplegada:** https://metas-ahorro.onrender.com/version
+**Desplegado en AWS Elastic Beanstalk (us-east-2):**
+
+- **URL pública:** http://calculadora-ahorro-env.eba-kh6xqmsb.us-east-2.elasticbeanstalk.com/
+- **Salud:** http://calculadora-ahorro-env.eba-kh6xqmsb.us-east-2.elasticbeanstalk.com/health
+- **Versión desplegada:** http://calculadora-ahorro-env.eba-kh6xqmsb.us-east-2.elasticbeanstalk.com/version
+
+> Despliegue anterior en Render: https://metas-ahorro.onrender.com
 
 > Alcance académico: no es una arquitectura de producción completa (sin base de datos, sin
 > autenticación, una sola instancia en plan gratuito).
@@ -91,15 +95,36 @@ curl http://localhost:8080/version     # {"revision":"local-test","version":"Ver
 El contenedor ejecuta **gunicorn** escuchando en `$PORT` (Render define `PORT=10000`); si no existe,
 usa 8000. `EXPOSE` solo documenta el puerto, no lo configura.
 
+## Despliegue en Elastic Beanstalk
+
+El entorno `Calculadora-ahorro-env` (aplicación `calculadora-ahorro`, región `us-east-2`) usa la
+plataforma Python de Beanstalk y se actualiza con `.github/workflows/deploy.yml` en cada push a `main`.
+
+| Archivo | Función |
+|---|---|
+| `Procfile` | Declara el punto de entrada: `gunicorn app:app --bind 0.0.0.0:8000`. Sin él, Beanstalk buscaría `application.py` con un objeto `application`. |
+| `.ebextensions/01_healthcheck.config` | Configura el health check HTTP contra `/health`. |
+| `requirements.txt` | Beanstalk lo detecta e instala las dependencias en cada despliegue. |
+
+```bash
+curl http://calculadora-ahorro-env.eba-kh6xqmsb.us-east-2.elasticbeanstalk.com/health
+curl http://calculadora-ahorro-env.eba-kh6xqmsb.us-east-2.elasticbeanstalk.com/version
+```
+
 ## Variables y Secrets
 
 | Nombre | Tipo | Dónde | Para qué |
 |---|---|---|---|
+| `AWS_ACCESS_KEY_ID` | **Secret** | GitHub → Settings → Secrets and variables → Actions | Credencial para desplegar en Elastic Beanstalk. |
+| `AWS_SECRET_ACCESS_KEY` | **Secret** | GitHub → … → Actions | Clave de la credencial anterior. |
 | `RENDER_DEPLOY_HOOK_URL` | **Secret** | GitHub → Settings → Secrets and variables → Actions | Disparar el despliegue. Quien lo tenga puede desplegar: por eso es secreto. |
 | `RENDER_SERVICE_URL` | Variable | GitHub → … → Actions → Variables | URL pública que comprueba `verify`. No es secreta. |
 | `GITHUB_TOKEN` | Automático | Lo crea GitHub en cada ejecución | Publicar en GHCR (solo el job `image` tiene `packages: write`). |
 | `APP_REVISION` | Build-arg (no secreto) | Lo pasa el workflow con el SHA del commit | Que `/version` diga qué commit está corriendo. |
 | `PORT` | Variable de entorno | La define Render | Puerto en el que escucha gunicorn. |
+
+Las variables `RENDER_*` corresponden al pipeline de `ci-cd.yml` (despliegue anterior); para Elastic
+Beanstalk solo se necesitan las credenciales `AWS_*`.
 
 No hay base de datos, por lo que no existen secretos de base de datos. La imagen en GHCR es pública,
 así que Render la descarga sin credenciales.
