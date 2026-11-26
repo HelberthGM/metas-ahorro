@@ -12,6 +12,9 @@ jobs:
       - name: Checkout código
         uses: actions/checkout@v3
 
+      - name: Crear zip del proyecto
+        run: zip -r deploy.zip . -x "*.git*"
+
       - name: Deploy a Elastic Beanstalk
         uses: einaregilsson/beanstalk-deploy@v21
         with:
@@ -21,4 +24,5 @@ jobs:
           environment_name: Calculadora-ahorro-env
           region: us-east-1
           version_label: ${{ github.sha }}
-          deployment_package: .
+          deployment_package: deploy.zip
+
